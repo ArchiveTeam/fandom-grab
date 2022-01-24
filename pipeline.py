@@ -63,7 +63,7 @@ VERSION = '20220124.02'
 USER_AGENT = 'Archive Team'
 TRACKER_ID = 'fandom'
 TRACKER_HOST = 'legacy-api.arpa.li'
-MULTI_ITEM_SIZE = 5
+MULTI_ITEM_SIZE = 20
 
 
 ###########################################################################
