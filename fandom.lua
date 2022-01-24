@@ -279,10 +279,13 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
     end
   end
 
-  if allowed(url) and status_code < 300 then
+  if allowed(url) and status_code < 300 and not string.match(url, "^https://[^%.]+.wikia.nocookie.net/") then
     html = read_file(file)
     if string.match(url, "/api%.php%?action=query&pageids=[0-9]+&format=json$") then
       local title = JSON:decode(html)["query"]["pages"][item_value]["title"]
+      if not title then
+        return urls
+      end
       local base = string.match(url, "^(https?://[^/]+/)")
       check(base .. "index.php?curid=" .. item_value)
       ids[title] = true
