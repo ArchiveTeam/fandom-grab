@@ -59,11 +59,11 @@ if not WGET_AT:
 #
 # Update this each time you make a non-cosmetic change.
 # It will be added to the WARC files and reported to the tracker.
-VERSION = '20220122.01'
+VERSION = '20220124.01'
 USER_AGENT = 'Archive Team'
 TRACKER_ID = 'fandom'
 TRACKER_HOST = 'legacy-api.arpa.li'
-MULTI_ITEM_SIZE = 20
+MULTI_ITEM_SIZE = 5
 
 
 ###########################################################################
@@ -273,12 +273,17 @@ class WgetArgs(object):
             '--warc-zstd-dict', ItemInterpolation('%(item_dir)s/zstdict'),
         ])
 
+        item['item_name'] = '\0'.join(
+            s for s in item['item_name'].split('\0')
+            if not s.startswith('user:')
+        )
+
         for item_name in item['item_name'].split('\0'):
             wget_args.extend(['--warc-header', 'x-wget-at-project-item-name: '+item_name])
             wget_args.append('item-name://'+item_name)
             item_type, item_wiki = item_name.split(':', 1)
             wget_args.extend(['--warc-header', 'fandom-wiki: '+item_wiki])
-            if item_type != 'base':
+            if item_type not in ('base', 'url'):
                 item_wiki, item_value = item_wiki.split(':', 1)
             if item_type == 'page':
                 wget_args.extend(['--warc-header', 'fandom-'+item_wiki+'-page: '+item_value])
@@ -287,8 +292,11 @@ class WgetArgs(object):
                 wget_args.extend(['--warc-header', 'fandom-'+item_wiki+'-f: '+item_value])
                 wget_args.append('https://'+item_wiki+'.fandom.com/f/p/'+item_value)
             elif item_type == 'base':
-                wget_args.extend(['--warc-header', 'fandom-'+item_wiki+'-base: '+item_value])
+                wget_args.extend(['--warc-header', 'fandom-base: '+item_wiki])
                 wget_args.append('https://'+item_wiki+'.fandom.com/api.php')
+            elif item_type == 'url':
+                item_value = item_wiki
+                wget_args.append(item_value)
             else:
                 raise Exception('Unknown item')
 

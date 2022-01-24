@@ -4,8 +4,8 @@ local urlparse = require("socket.url")
 local http = require("socket.http")
 JSON = (loadfile "JSON.lua")()
 
-local item_dir = os.getenv('item_dir')
-local warc_file_base = os.getenv('warc_file_base')
+local item_dir = os.getenv("item_dir")
+local warc_file_base = os.getenv("warc_file_base")
 local item_type = nil
 local item_name = nil
 local item_value = nil
@@ -64,14 +64,19 @@ processed = function(url)
   return false
 end
 
+discover_item = function(item)
+  discovered_items[item] = true
+end
+
 allowed = function(url, parenturl)
   if string.match(url, "[%?&]mobileaction=")
-    or string.match(url, "/wiki/Special:History")
-    or string.match(url, "/wiki/Special:MobileVisualEditor")
-    or string.match(url, "/wiki/[^%?&]+%?oldid=")
-    or string.match(url, "/wiki/[^%?&]+%?diff=")
-    or string.match(url, "/wiki/[^%?&]+%?dir=")
-    or string.match(url, "/wiki/[^%?&]+%?offset=")
+    or string.match(url, "/wiki/Special:[A-Za-z0-9]+[^A-Za-z0-9]")
+    or string.match(url, "/wiki/[^%?&]+%?.*oldid=")
+    or string.match(url, "/wiki/[^%?&]+%?.*diff=")
+    or string.match(url, "/wiki/[^%?&]+%?.*dir=")
+    or string.match(url, "/wiki/[^%?&]+%?.*offset=")
+    or string.match(url, "/wiki/[^%?&]+%?.*action=edit")
+    or string.match(url, "/wiki/[^%?&]+%?.*action=history")
     or string.match(url, "^https?://[^/]*fandom%.com/signin")
     or string.match(url, "^https?://[^/]*fandom%.com/register") then
     return false
@@ -80,6 +85,7 @@ allowed = function(url, parenturl)
   if not (
     string.match(url, "^https?://[^/]*fandom%.com")
     or string.match(url, "^https?://[^/]*wikia%.org")
+    or string.match(url, "^https?://[^/]*wikia%.com")
     or string.match(url, "^https?://[^/]*nocookie%.net/")
   ) then
     local temp = ""
@@ -91,6 +97,16 @@ allowed = function(url, parenturl)
       temp = temp .. c
     end
     outlinks[string.match(temp, "^([^%s]+)")] = true
+    return false
+  end
+
+  local user = string.match(url, "/wiki/User:([^%?&]+)")
+  if user then
+    discover_item("user:" .. item_wiki .. ":" .. user)
+  end
+
+  local fandom_wiki = string.match(url, "^https?://([^%.]+)%.fandom%.com/")
+  if fandom_wiki and fandom_wiki ~= item_wiki then
     return false
   end
 
@@ -106,18 +122,44 @@ allowed = function(url, parenturl)
   end
 
   if string.match(url, "^https://[^%.]+.wikia.nocookie.net/") then
-    discovered_items["url:" .. url] = true
+    if item_type == "url" then
+      return true
+    end
+    discover_item("url:" .. url)
     return false
   end
 
   local wiki_page = string.match(url, "/wiki/([^%?&]+)")
-  if wiki_page and ids[urlparse.unescape(wiki_page)] then
+  if wiki_page and (
+    ids[urlparse.unescape(wiki_page)]
+    or (item_type == "base" and string.match(wiki_page, "^Special:"))
+  ) then
     return true
   end
 
-  for s in string.gmatch(url, "([0-9]+)") do
-    if ids[s] then
-      return true
+  if item_type == "base" and (
+    string.match(url, "api%.php%?.*action=query")
+    or string.match(url, "api%.php$")
+    or string.match(url, "^https?://[^/]+/f$")
+    or string.match(url, "controller=DiscussionThread")
+  ) then
+    return true
+  end
+
+  if item_type == "page" and string.match(url, "controller=ArticleCommentsController") then
+    return true
+  end
+
+  if string.match(url, "controller=Fandom")
+    or string.match(url, "controller=RecirculationApi") then
+    return true
+  end
+
+  if item_type == "f" or item_type == "page" then
+    for s in string.gmatch(url, "([0-9]+)") do
+      if ids[s] then
+        return true
+      end
     end
   end
   
@@ -127,6 +169,10 @@ end
 wget.callbacks.download_child_p = function(urlpos, parent, depth, start_url_parsed, iri, verdict, reason)
   local url = urlpos["url"]["url"]
   local html = urlpos["link_expect_html"]
+
+  if item_type == "url" then
+    return false
+  end
 
   if not processed(url) and allowed(url, parent["url"]) then
     addedtolist[url] = true
@@ -142,6 +188,10 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
   
   downloaded[url] = true
 
+  if item_type == "url" then
+    return urls
+  end
+
   local function decode_codepoint(newurl)
     newurl = string.gsub(
       newurl, "\\[uU]([0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F])",
@@ -153,8 +203,10 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
   end
 
   local function check(newurl)
-    if string.match(newurl, "^https?://[^%.]+%.fandom%.com") then
+    if string.match(newurl, "^https?://[^%.]+%.fandom%.com")
+      and not string.match(newurl, "%.php") then
       check(string.gsub(newurl, "^(https?://[^%.]+%.)fandom%.com", "%1wikia%.org"))
+      check(string.gsub(newurl, "^(https?://[^%.]+%.)fandom%.com", "%1wikia%.com"))
     end
     if string.match(newurl, "%%22") then
       return nil
@@ -169,7 +221,6 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
     if not processed(url_)
       and string.match(url_, "^https?://[^/%.]+%..+")
       and allowed(url_, origurl) then
-print(url_)
       table.insert(urls, { url=url_ })
       addedtolist[url_] = true
       addedtolist[url] = true
@@ -178,7 +229,7 @@ print(url_)
 
   local function checknewurl(newurl)
     newurl = decode_codepoint(newurl)
-    if string.match(newurl, "['\"\\><]") then
+    if string.match(newurl, "['\"><]") then
       return nil
     end
     if string.match(newurl, "^https?:////") then
@@ -234,50 +285,66 @@ print(url_)
       local base = string.match(url, "^(https?://[^/]+/)")
       check(base .. "index.php?curid=" .. item_value)
       ids[title] = true
+      title = urlparse.escape(title)
+      ids[title] = true
       check(base .. "wiki/" .. title)
+      check(base .. "wikia.php?controller=ArticleCommentsController&method=getCommentCount&namespace=0&title=" .. title .. "&hideDeleted=true")
+      check(base .. "wikia.php?controller=ArticleCommentsController&method=getComments&title=" .. title .. "&namespace=0&hideDeleted=true")
+      title = string.gsub(title, "%%20", "%+")
+      ids[title] = true
+      check(base .. "wiki/" .. title)
+      check(base .. "wikia.php?controller=ArticleCommentsController&method=getCommentCount&namespace=0&title=" .. title .. "&hideDeleted=true")
+      check(base .. "wikia.php?controller=ArticleCommentsController&method=getComments&title=" .. title .. "&namespace=0&hideDeleted=true")
     end
     if string.match(url, "^https?://[^/]*/wiki/[^%?&]") then
       local data = string.match(html, "<script>var%s+_plc%s*=%s*({.-});[^<]*</script>")
-      data = JSON:decode(data)
-      if data["pgId"] == item_value
-        and not string.match(url, "[%?&]file=") then
-        for image_key in string.gmatch(html, 'data%-image%-key="([^"]+)') do
-          local newurl = url
-          local base = string.match(url, "^(https?://[^/]+/)")
-          if string.match(url, "%?") then
-            newurl = newurl .. "&"
-          else
-            newurl = newurl .. "?"
+      if data then
+        data = JSON:decode(data)
+        if data["pgId"] == item_value
+          and not string.match(url, "[%?&]file=") then
+          for image_key in string.gmatch(html, 'data%-image%-key="([^"]+)') do
+            local newurl = url
+            local base = string.match(url, "^(https?://[^/]+/)")
+            if string.match(url, "%?") then
+              newurl = newurl .. "&"
+            else
+              newurl = newurl .. "?"
+            end
+            newurl = newurl .. "file=" .. image_key
+            check(newurl)
+            check(base .. "wikia.php?controller=Lightbox&method=getMediaDetail&fileTitle=" .. image_key .. "&format=json")
           end
-          newurl = newurl .. "file=" .. image_key
-          check(newurl)
-          check(base .. "wikia.php?controller=Lightbox&method=getMediaDetail&fileTitle=" .. image_key .. "&format=json")
         end
       end
     end
-    if string.match(url, "^https?://[^/]*/api%.php$") then
-      for _, name in pairs({"allpages", "allimages", "allinfoboxes", "allusers"}) do
+    if string.match(url, "^https?://[^/]+/api%.php$") then
+      for _, name in pairs({"allpages", "allimages", "allinfoboxes"}) do
         check(url .. "?action=query&list=" .. name .. "&format=json")
       end
       local base = string.match(url, "^(https?://[^/]+/)")
-      check(base .. "/wiki/Special:SpecialPages")
+      check(base .. "wiki/Special:SpecialPages")
+      check(base .. "f")
+      check(base .. "wikia.php?controller=RecirculationApi&method=getFandomArticles&limit=9")
+      check(base .. "wikia.php?controller=RecirculationApi&method=getLatestThreads&_lang=en")
+      check(base .. "wikia.php?controller=Fandom%5CFandomDesktop%5CRail%5CRailController&method=renderLazyContentsAnon&modules%5B%5D=Fandom%5CFandomDesktop%5CRail%5CPopularPagesModuleService&fdRightRail=&uselang=&useskin=fandomdesktop:")
       check(base)
     end
-    if string.match(url, "/api%.php%?action=query") then
+    if string.match(url, "/api%.php%?.*action=query") then
       local json = JSON:decode(html)
       if json["continue"] then
         for key, value in pairs(json["continue"]) do
           if key ~= "continue" then
+            value = string.gsub(urlparse.escape(value), "%%", "%%%%")
             if string.match(url, "[%?&]" .. key .. "=") then
               check(string.gsub(url, "([%?&]" .. key .. "=)[^%?&]+", "%1" .. value))
             else
-              check(url .. "&" .. key .. "=" .. value)
+              check(string.gsub(url, "(&format=json)", "&" .. key .. "=" .. value .. "%1"))
             end
           end
         end
       end
       local largest = 0
-      for _, pattern in pairs({'"pageid"%s*:^s*"?([0-9]+)"?', "[%?&]curid=([0-9]+)"}) do
+      for _, pattern in pairs({'"pageid"%s*:%s*"?([0-9]+)"?', "[%?&]curid=([0-9]+)"}) do
         for pageid in string.gmatch(html, pattern) do
           pageid = tonumber(pageid)
           if pageid > largest then
@@ -286,7 +353,7 @@ print(url_)
         end
       end
       for i=0,largest do
-        discovered_items["page:" .. item_wiki .. ":" .. tostring(i)] = true
+        discover_item("page:" .. item_wiki .. ":" .. tostring(i))
       end
     end
     if string.match(url, "^/f/p/[0-9]+$") then
@@ -294,9 +361,20 @@ print(url_)
     end
     if string.match(url, "/wikia%.php%?.*controller=DiscussionThread") then
       local json = JSON:decode(html)
-      for _, data in pairs(json["_embedded"]["doc:posts"]) do
-        ids[data["id"]] = true
-        check("https://lgbta.fandom.com/f/p/" .. item_value .. "/r/" .. data["id"])
+      if item_type == "f" then
+        for _, data in pairs(json["_embedded"]["doc:posts"]) do
+          ids[data["id"]] = true
+          check("https://lgbta.fandom.com/f/p/" .. item_value .. "/r/" .. data["id"])
+        end
+      elseif item_type == "base" then
+        for _, data in pairs(json["_embedded"]["threads"]) do
+          discover_item("f:" .. item_wiki .. ":" .. data["id"])
+        end
+      end
+    end
+    if string.match(url, "wikia%.php") then
+      for user in string.gmatch(html, '"name"%s*:%s*"([^"]+)"') do
+        discover_item("user:" .. item_wiki .. ":" .. user)
       end
     end
     for newurl in string.gmatch(string.gsub(html, "&quot;", '"'), '([^"]+)') do
@@ -330,28 +408,34 @@ wget.callbacks.httploop_result = function(url, err, http_stat)
   io.stdout:flush()
 
   local wiki = string.match(url["url"], "^https?://([^%.]+)%.fandom%.com/api%.php$")
+  local type_ = nil
   if wiki then
-    item_type = 'base'
+    type_ = "base"
     value = nil
   end
   if not wiki then
     wiki, value = string.match(url["url"], "^https?://([^%.]+)%.fandom%.com/api%.php%?action=query&pageids=([0-9]+)&format=json$")
-    item_type = 'page'
+    type_ = "page"
   end
   if not wiki then
     wiki, value = string.match(url["url"], "^https?://([^%.]+)%.fandom%.com/f/p/([0-9]+)$")
-    item_type = 'f'
+    type_ = "f"
+  end
+  if not wiki and string.match(url["url"], "^https://[^%.]+.wikia.nocookie.net/")then
+    wiki = url["url"]
+    type_ = "url"
   end
   if wiki then
     abortgrab = false
+    item_type = type_
     item_wiki = wiki
     item_value = value
-    ids[item_value] = true
     item_name = item_type .. ":" .. item_wiki
     if item_value then
+      ids[item_value] = true
       item_name = item_name .. ":" .. item_value
     end
-    print('Archiving item ' .. item_name)
+    print("Archiving item " .. item_name)
   end
 
   if status_code == 204 then
@@ -360,7 +444,8 @@ wget.callbacks.httploop_result = function(url, err, http_stat)
 
   if status_code >= 300 and status_code <= 399 then
     local newloc = urlparse.absolute(url["url"], http_stat["newloc"])
-    if string.match(url["url"], "/wiki/") then
+    if string.match(url["url"], "/wiki/")
+      and string.match(newloc, "/wiki/") then
       ids[string.match(newloc, "/wiki/([^%?&]+)")] = true
     end
     if processed(newloc) or not allowed(newloc, url["url"]) then
@@ -415,37 +500,42 @@ wget.callbacks.httploop_result = function(url, err, http_stat)
 end
 
 wget.callbacks.finish = function(start_time, end_time, wall_time, numurls, total_downloaded_bytes, total_download_time)
-  local file = io.open(item_dir .. '/' .. warc_file_base .. '_bad-items.txt', 'w')
+  local file = io.open(item_dir .. "/" .. warc_file_base .. "_bad-items.txt", "w")
   for url, _ in pairs(bad_items) do
     file:write(url .. "\n")
   end
   file:close()
-  local items = nil
-  for item, _ in pairs(outlinks) do
-    print('found item', item)
-    if items == nil then
-      items = item
-    else
-      items = items .. "\0" .. item
-    end
-  end
-  if items ~= nil then
-    local tries = 0
-    while tries < 10 do
-      local body, code, headers, status = http.request(
-        "http://blackbird-amqp.meo.ws:23038/TODO/",
-        items
-      )
-      if code == 200 or code == 409 then
-        break
+  for key, data in pairs({
+    ["fandom-yeogkicq6a1f1cs"] = discovered_items,
+    ["urls-nbv5q13ie6jf4br"] = outlinks
+  }) do
+    local items = nil
+    for item, _ in pairs(data) do
+      print("found item", item)
+      if items == nil then
+        items = item
+      else
+        items = items .. "\0" .. item
       end
-      io.stdout:write("Could not queue items.\n")
-      io.stdout:flush()
-      os.execute("sleep " .. math.floor(math.pow(2, tries)))
-      tries = tries + 1
     end
-    if tries == 10 then
-      abort_item()
+    if items ~= nil then
+      local tries = 0
+      while tries < 10 do
+        local body, code, headers, status = http.request(
+          "http://blackbird-amqp.meo.ws:23038/" .. key .. "/",
+          items
+        )
+        if code == 200 or code == 409 then
+          break
+        end
+        io.stdout:write("Could not queue items.\n")
+        io.stdout:flush()
+        os.execute("sleep " .. math.floor(math.pow(2, tries)))
+        tries = tries + 1
+      end
+      if tries == 10 then
+        abort_item()
+      end
     end
   end
 end
