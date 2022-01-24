@@ -151,7 +151,8 @@ allowed = function(url, parenturl)
   end
 
   if string.match(url, "controller=Fandom")
-    or string.match(url, "controller=RecirculationApi") then
+    or string.match(url, "controller=RecirculationApi")
+    or string.match(url, "controller=Lightbox") then
     return true
   end
 
@@ -326,6 +327,8 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
       check(base .. "f")
       check(base .. "wikia.php?controller=RecirculationApi&method=getFandomArticles&limit=9")
       check(base .. "wikia.php?controller=RecirculationApi&method=getLatestThreads&_lang=en")
+      check(base .. "wikia.php?controller=Lightbox&method=lightboxModalContent&format=html&lightboxVersion=&userLang=en")
+      check(base .. "wikia.php?controller=Lightbox&method=getTotalWikiImages&count=0&format=json&inclusive=true")
       check(base .. "wikia.php?controller=Fandom%5CFandomDesktop%5CRail%5CRailController&method=renderLazyContentsAnon&modules%5B%5D=Fandom%5CFandomDesktop%5CRail%5CPopularPagesModuleService&fdRightRail=&uselang=&useskin=fandomdesktop:")
       check(base)
     end
