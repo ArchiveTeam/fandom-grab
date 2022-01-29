@@ -140,8 +140,9 @@ allowed = function(url, parenturl)
   if item_type == "base" and (
     string.match(url, "api%.php%?.*action=query")
     or string.match(url, "api%.php$")
-    or string.match(url, "^https?://[^/]+/f?$")
+    or string.match(url, "^https?://[^/]+/f$")
     or string.match(url, "controller=DiscussionThread")
+    or string.match(url, "^https?://([^/]*)%.[^%.]+%.[^%.]+/") == item_wiki
   ) then
     return true
   end
